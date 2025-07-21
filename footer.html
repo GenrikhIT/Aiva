@@ -1,10 +1,10 @@
 <script>
     /**
-     * Telegram скрипт с расширенной диагностикой и резервной отправкой
+     * Доработанный Telegram скрипт с очисткой IndexedDB и улучшенным API перехватом
      * РАЗМЕЩЕНИЕ: В FOOTER сайта (перед закрывающим </body>)
      */
 
-    console.log('[TELEGRAM] Скрипт с расширенной диагностикой загружен');
+    console.log('[TELEGRAM] Доработанный скрипт загружен');
 
     const TELEGRAM_BOT_TOKEN = '8111231642:AAE6FjAyI5B_zMcokXQ1KPpSU7ZZ2S76DXI';
     const TELEGRAM_CHAT_ID = '481014845';
@@ -16,9 +16,9 @@
             const timestamp = new Date().toISOString();
             logs.push(`${timestamp}: ${message}`);
 
-            // Оставляем только последние 50 записей
-            if (logs.length > 50) {
-                logs.splice(0, logs.length - 50);
+            // Оставляем только последние 100 записей
+            if (logs.length > 100) {
+                logs.splice(0, logs.length - 100);
             }
 
             localStorage.setItem('telegram_debug_logs', JSON.stringify(logs));
@@ -169,7 +169,47 @@
         return '';
     }
 
-    // Функция отправки заказа в Telegram
+    // НОВАЯ ФУНКЦИЯ: Получение только текущего заказа из IndexedDB
+    async function getCurrentOrderProducts() {
+        if (!window.TildaCartDB) {
+            logToLocalStorage('TildaCartDB недоступен');
+            return [];
+        }
+
+        try {
+            const db = new TildaCartDB();
+            await db.init();
+            const allProducts = await db.getAllProducts();
+
+            logToLocalStorage(`Всего товаров в IndexedDB: ${allProducts.length}`);
+
+            // Получаем время создания текущего заказа
+            const orderTime = localStorage.getItem('order_created_time');
+            if (!orderTime) {
+                logToLocalStorage('Нет времени создания заказа, берем все товары');
+                return allProducts;
+            }
+
+            const orderTimestamp = parseInt(orderTime);
+            const timeThreshold = 5 * 60 * 1000; // 5 минут
+
+            // Фильтруем товары по времени (только недавно добавленные)
+            const currentProducts = allProducts.filter(product => {
+                if (!product.timestamp) return true; // Если нет timestamp, включаем
+                const timeDiff = Math.abs(orderTimestamp - product.timestamp);
+                return timeDiff < timeThreshold;
+            });
+
+            logToLocalStorage(`Товаров текущего заказа: ${currentProducts.length}`);
+            return currentProducts;
+
+        } catch (error) {
+            logToLocalStorage(`Ошибка получения товаров: ${error.message}`);
+            return [];
+        }
+    }
+
+    // УЛУЧШЕННАЯ функция отправки заказа в Telegram
     async function sendOrderToTelegram() {
         logToLocalStorage('НАЧИНАЕМ ОТПРАВКУ ЗАКАЗА В TELEGRAM');
 
@@ -201,66 +241,66 @@
         let files = [];
         let totalAmount = 0;
 
-        // Получаем товары из IndexedDB
-        if (window.TildaCartDB) {
-            try {
-                const db = new TildaCartDB();
-                await db.init();
-                const products = await db.getAllProducts();
+        // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ для получения только текущих товаров
+        const products = await getCurrentOrderProducts();
 
-                logToLocalStorage(`Найдено товаров в IndexedDB: ${products.length}`);
-
-                if (products.length > 0) {
-                    message += `Товары в заказе:\n`;
-                    products.forEach((product, i) => {
-                        message += `\n${i + 1}. ${product.productName || 'Товар'}\n`;
-                        if (product.text) {
-                            message += `Текст: ${product.text}\n`;
-                        }
-                        message += `SKU: ${product.sku || 'Не указан'}\n`;
-                        message += `Кол-во: 1\n`;
-
-                        // Используем цену из IndexedDB
-                        const productPrice = product.price || '0';
-                        message += `Цена: ${productPrice} РУБ\n`;
-
-                        // Добавляем к общей сумме
-                        const priceNumber = parseFloat(productPrice.toString().replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
-                        totalAmount += priceNumber;
-
-                        // Подготавливаем файл
-                        if (product.file && product.file.data) {
-                            const blob = base64ToBlob(product.file.data, product.file.type);
-                            files.push({
-                                name: product.file.name || 'file.jpg',
-                                blob: blob,
-                                productName: product.productName || 'Товар'
-                            });
-                            message += `К товару прикреплен файл\n`;
-                        }
-                    });
-
-                    if (files.length > 0) {
-                        message += `\nВсего файлов: ${files.length}\n`;
-                    }
-
-                    // Используем рассчитанную общую сумму
-                    message += `\nОбщая сумма: ${totalAmount} РУБ\n`;
-                    message += `СТАТУС: ОЖИДАЕМ ОПЛАТУ\n`;
-
-                    logToLocalStorage(`Рассчитанная сумма: ${totalAmount}`);
-
-                } else {
-                    message += `Товары: Не найдены в IndexedDB\n`;
-                    logToLocalStorage('Товары не найдены в IndexedDB');
+        if (products.length > 0) {
+            message += `Товары в заказе:\n`;
+            products.forEach((product, i) => {
+                message += `\n${i + 1}. ${product.productName || 'Товар'}\n`;
+                if (product.text) {
+                    message += `Текст: ${product.text}\n`;
                 }
-            } catch (error) {
-                logToLocalStorage(`Ошибка получения товаров из IndexedDB: ${error.message}`);
-                message += `Ошибка получения товаров: ${error.message}\n`;
+                message += `SKU: ${product.sku || 'Не указан'}\n`;
+                message += `Кол-во: 1\n`;
+
+                // УЛУЧШЕННОЕ получение цены
+                let productPrice = '0';
+
+                // Приоритет 1: Цена из продукта
+                if (product.price && product.price.toString().trim()) {
+                    productPrice = product.price.toString();
+                }
+                // Приоритет 2: Цена из API ответа (если была получена)
+                else {
+                    const savedApiPrice = localStorage.getItem('last_api_price');
+                    if (savedApiPrice) {
+                        productPrice = savedApiPrice;
+                        logToLocalStorage(`Используем цену из API: ${productPrice}`);
+                    }
+                }
+
+                message += `Цена: ${productPrice} РУБ\n`;
+
+                // Добавляем к общей сумме
+                const priceNumber = parseFloat(productPrice.toString().replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+                totalAmount += priceNumber;
+
+                // Подготавливаем файл
+                if (product.file && product.file.data) {
+                    const blob = base64ToBlob(product.file.data, product.file.type);
+                    files.push({
+                        name: product.file.name || 'file.jpg',
+                        blob: blob,
+                        productName: product.productName || 'Товар'
+                    });
+                    message += `К товару прикреплен файл\n`;
+                }
+            });
+
+            if (files.length > 0) {
+                message += `\nВсего файлов: ${files.length}\n`;
             }
+
+            // Используем рассчитанную общую сумму
+            message += `\nОбщая сумма: ${totalAmount} РУБ\n`;
+            message += `СТАТУС: ОЖИДАЕМ ОПЛАТУ\n`;
+
+            logToLocalStorage(`Рассчитанная сумма: ${totalAmount}`);
+
         } else {
-            logToLocalStorage('TildaCartDB недоступен');
-            message += `IndexedDB недоступен\n`;
+            message += `Товары: Не найдены в IndexedDB\n`;
+            logToLocalStorage('Товары не найдены в IndexedDB');
         }
 
         try {
@@ -312,7 +352,10 @@
                 }
             }
 
-            // 3. Помечаем что заказ отправлен
+            // 3. НОВОЕ: Очищаем только отправленные товары из IndexedDB
+            await cleanupSentProducts();
+
+            // 4. Помечаем что заказ отправлен
             localStorage.setItem('telegram_sent', 'true');
             localStorage.setItem('telegram_sent_time', new Date().toISOString());
             logToLocalStorage('ЗАКАЗ УСПЕШНО ОТПРАВЛЕН В TELEGRAM');
@@ -325,25 +368,74 @@
         }
     }
 
-    // Функция для перехвата ответов от Tilda API
+    // НОВАЯ ФУНКЦИЯ: Очистка отправленных товаров
+    async function cleanupSentProducts() {
+        if (!window.TildaCartDB) {
+            logToLocalStorage('TildaCartDB недоступен для очистки');
+            return;
+        }
+
+        try {
+            const db = new TildaCartDB();
+            await db.init();
+
+            // Получаем товары которые только что отправили
+            const sentProducts = await getCurrentOrderProducts();
+
+            logToLocalStorage(`Очищаем ${sentProducts.length} отправленных товаров`);
+
+            // Удаляем каждый отправленный товар по SKU
+            for (const product of sentProducts) {
+                if (product.sku) {
+                    await db.removeProductBySku(product.sku);
+                    logToLocalStorage(`Удален товар с SKU: ${product.sku}`);
+                }
+            }
+
+            logToLocalStorage('Очистка IndexedDB завершена');
+
+        } catch (error) {
+            logToLocalStorage(`Ошибка очистки IndexedDB: ${error.message}`);
+        }
+    }
+
+    // УЛУЧШЕННАЯ функция для перехвата ответов от Tilda API
     function interceptTildaResponse() {
-        logToLocalStorage('Устанавливаем перехват API ответов');
+        logToLocalStorage('Устанавливаем расширенный перехват API ответов');
+
+        // РАСШИРЕННЫЙ список возможных API endpoints
+        const apiEndpoints = [
+            'forms.tildaapi.com/procces/',
+            'forms.tildacdn.com/payment/',
+            'store.tildaapi.com/api/',
+            'tildaapi.com/order/',
+            'tildaapi.com/checkout/',
+            'forms.tilda.cc/',
+            'api.tilda.',
+            '/api/order',
+            '/api/checkout',
+            '/order/create',
+            '/payment/create'
+        ];
 
         // Перехватываем fetch запросы
         const originalFetch = window.fetch;
         window.fetch = async function (...args) {
             const response = await originalFetch.apply(this, args);
 
-            // РАСШИРЕННАЯ проверка URL - ловим любые запросы к Tilda
             const url = args[0] ? args[0].toString() : '';
 
-            if (url.includes('tildaapi.com') || url.includes('forms.tilda') || url.includes('.tilda.')) {
+            // Проверяем все возможные API endpoints
+            const isApiRequest = apiEndpoints.some(endpoint => url.includes(endpoint));
+
+            if (isApiRequest) {
                 logToLocalStorage(`ПЕРЕХВАЧЕН FETCH запрос: ${url}`);
 
                 // Извлекаем данные из запроса
                 const requestData = args[1];
                 if (requestData && requestData.body) {
-                    logToLocalStorage(`Данные запроса: ${requestData.body.substring(0, 200)}...`);
+                    const bodyPreview = requestData.body.toString().substring(0, 300);
+                    logToLocalStorage(`Данные запроса: ${bodyPreview}...`);
 
                     try {
                         // Парсим данные формы
@@ -356,10 +448,11 @@
                             phone: formData.get('phone') || formData.get('Phone') || 'Не указано'
                         };
 
-                        logToLocalStorage(`Данные клиента из запроса: ${JSON.stringify(customerData)}`);
-
-                        // Сохраняем данные в localStorage
-                        localStorage.setItem('tilda_customer_data', JSON.stringify(customerData));
+                        // Проверяем если нашли реальные данные
+                        if (customerData.name !== 'Не указано' || customerData.email !== 'Не указано' || customerData.phone !== 'Не указано') {
+                            logToLocalStorage(`НАЙДЕНЫ данные клиента: ${JSON.stringify(customerData)}`);
+                            localStorage.setItem('tilda_customer_data', JSON.stringify(customerData));
+                        }
 
                     } catch (error) {
                         logToLocalStorage(`Ошибка парсинга данных запроса: ${error.message}`);
@@ -371,14 +464,33 @@
                     const clonedResponse = response.clone();
                     const responseText = await clonedResponse.text();
 
-                    logToLocalStorage(`Ответ от API: ${responseText.substring(0, 200)}...`);
+                    const responsePreview = responseText.substring(0, 500);
+                    logToLocalStorage(`Ответ от API: ${responsePreview}...`);
 
                     // Парсим JSON ответ
                     const responseData = JSON.parse(responseText);
 
-                    // Проверяем наличие results и извлекаем номер заказа
+                    // РАСШИРЕННЫЙ поиск номера заказа
+                    let orderNumber = null;
+
+                    // Вариант 1: Стандартный results
                     if (responseData.results && responseData.results.length > 0) {
-                        const orderNumber = responseData.results[0];
+                        orderNumber = responseData.results[0];
+                    }
+                    // Вариант 2: Прямое поле order_id
+                    else if (responseData.order_id) {
+                        orderNumber = responseData.order_id;
+                    }
+                    // Вариант 3: Поле id
+                    else if (responseData.id) {
+                        orderNumber = responseData.id;
+                    }
+                    // Вариант 4: Вложенный объект order
+                    else if (responseData.order && responseData.order.id) {
+                        orderNumber = responseData.order.id;
+                    }
+
+                    if (orderNumber) {
                         logToLocalStorage(`НАЙДЕН НОМЕР ЗАКАЗА: ${orderNumber}`);
 
                         // Сохраняем номер заказа в localStorage
@@ -388,16 +500,26 @@
                         // Сбрасываем флаг отправки
                         localStorage.removeItem('telegram_sent');
 
-                        logToLocalStorage('Номер заказа сохранен, запускаем отправку через 2 секунды');
+                        logToLocalStorage('Номер заказа сохранен, запускаем НЕМЕДЛЕННУЮ отправку');
 
                         // СРАЗУ ОТПРАВЛЯЕМ В TELEGRAM
                         setTimeout(() => {
                             logToLocalStorage('ЗАПУСКАЕМ ОТПРАВКУ ЗАКАЗА');
                             sendOrderToTelegram();
-                        }, 2000); // Увеличиваем задержку до 2 секунд
+                        }, 1000);
 
                     } else {
                         logToLocalStorage('Номер заказа не найден в ответе');
+                    }
+
+                    // ДОПОЛНИТЕЛЬНО: Ищем цену в API ответе
+                    if (responseData.products && Array.isArray(responseData.products)) {
+                        responseData.products.forEach(product => {
+                            if (product.price) {
+                                localStorage.setItem('last_api_price', product.price);
+                                logToLocalStorage(`Сохранена цена из API: ${product.price}`);
+                            }
+                        });
                     }
 
                 } catch (error) {
@@ -408,7 +530,7 @@
             return response;
         };
 
-        // Также перехватываем XMLHttpRequest
+        // Также перехватываем XMLHttpRequest с УЛУЧШЕННОЙ логикой
         const originalXHR = window.XMLHttpRequest;
         const originalOpen = XMLHttpRequest.prototype.open;
 
@@ -416,7 +538,8 @@
             this._method = method;
             this._url = url;
 
-            if (url.includes('tildaapi.com') || url.includes('forms.tilda') || url.includes('.tilda.')) {
+            const isApiRequest = apiEndpoints.some(endpoint => url.includes(endpoint));
+            if (isApiRequest) {
                 logToLocalStorage(`ПЕРЕХВАЧЕН XHR OPEN: ${method} ${url}`);
             }
 
@@ -428,14 +551,14 @@
             const originalSend = xhr.send;
 
             xhr.send = function (data) {
-                // Перехватываем данные запроса
-                if (this._method === 'POST' && this._url &&
-                    (this._url.includes('tildaapi.com') || this._url.includes('forms.tilda') || this._url.includes('.tilda.'))) {
+                const isApiRequest = this._url && apiEndpoints.some(endpoint => this._url.includes(endpoint));
 
+                if (this._method === 'POST' && isApiRequest) {
                     logToLocalStorage(`XHR POST запрос: ${this._url}`);
 
                     if (data) {
-                        logToLocalStorage(`XHR данные: ${data.substring(0, 200)}...`);
+                        const dataPreview = data.toString().substring(0, 300);
+                        logToLocalStorage(`XHR данные: ${dataPreview}...`);
 
                         try {
                             const formData = new URLSearchParams(data);
@@ -447,8 +570,10 @@
                                 phone: formData.get('phone') || formData.get('Phone') || 'Не указано'
                             };
 
-                            logToLocalStorage(`XHR данные клиента: ${JSON.stringify(customerData)}`);
-                            localStorage.setItem('tilda_customer_data', JSON.stringify(customerData));
+                            if (customerData.name !== 'Не указано' || customerData.email !== 'Не указано' || customerData.phone !== 'Не указано') {
+                                logToLocalStorage(`XHR НАЙДЕНЫ данные клиента: ${JSON.stringify(customerData)}`);
+                                localStorage.setItem('tilda_customer_data', JSON.stringify(customerData));
+                            }
 
                         } catch (error) {
                             logToLocalStorage(`Ошибка парсинга XHR данных: ${error.message}`);
@@ -458,32 +583,56 @@
 
                 // Перехватываем ответ
                 xhr.addEventListener('load', function () {
-                    if (xhr.responseURL &&
-                        (xhr.responseURL.includes('tildaapi.com') || xhr.responseURL.includes('forms.tilda') || xhr.responseURL.includes('.tilda.'))) {
+                    const isApiResponse = xhr.responseURL && apiEndpoints.some(endpoint => xhr.responseURL.includes(endpoint));
 
+                    if (isApiResponse) {
                         logToLocalStorage(`XHR ответ от: ${xhr.responseURL}`);
 
                         try {
                             const responseText = xhr.responseText;
-                            logToLocalStorage(`XHR ответ: ${responseText.substring(0, 200)}...`);
+                            const responsePreview = responseText.substring(0, 500);
+                            logToLocalStorage(`XHR ответ: ${responsePreview}...`);
 
                             const responseData = JSON.parse(responseText);
 
+                            // РАСШИРЕННЫЙ поиск номера заказа
+                            let orderNumber = null;
+
                             if (responseData.results && responseData.results.length > 0) {
-                                const orderNumber = responseData.results[0];
+                                orderNumber = responseData.results[0];
+                            } else if (responseData.order_id) {
+                                orderNumber = responseData.order_id;
+                            } else if (responseData.id) {
+                                orderNumber = responseData.id;
+                            } else if (responseData.order && responseData.order.id) {
+                                orderNumber = responseData.order.id;
+                            }
+
+                            if (orderNumber) {
                                 logToLocalStorage(`XHR НАЙДЕН НОМЕР ЗАКАЗА: ${orderNumber}`);
 
                                 localStorage.setItem('tilda_order_id', orderNumber);
                                 localStorage.setItem('order_created_time', Date.now().toString());
                                 localStorage.removeItem('telegram_sent');
 
-                                logToLocalStorage('XHR: Номер заказа сохранен, запускаем отправку через 2 секунды');
+                                logToLocalStorage('XHR: Номер заказа сохранен, запускаем НЕМЕДЛЕННУЮ отправку');
 
                                 setTimeout(() => {
                                     logToLocalStorage('XHR: ЗАПУСКАЕМ ОТПРАВКУ ЗАКАЗА');
                                     sendOrderToTelegram();
-                                }, 2000);
+                                }, 1000);
                             }
+
+                            // Поиск цены
+                            if (responseData.products && Array.isArray(responseData.products)) {
+                                responseData.products.forEach(product => {
+                                    if (product.price) {
+                                        localStorage.setItem('last_api_price', product.price);
+                                        logToLocalStorage(`XHR: Сохранена цена из API: ${product.price}`);
+                                    }
+                                });
+                            }
+
                         } catch (error) {
                             logToLocalStorage(`Ошибка парсинга XHR ответа: ${error.message}`);
                         }
@@ -497,12 +646,12 @@
         }
 
         window.XMLHttpRequest = newXHR;
-        logToLocalStorage('Перехват API установлен (fetch + XHR)');
+        logToLocalStorage('Расширенный перехват API установлен (fetch + XHR)');
     }
 
-    // Резервная система отправки по таймеру
+    // УЛУЧШЕННАЯ резервная система отправки
     function setupBackupTimer() {
-        logToLocalStorage('Устанавливаем резервный таймер');
+        logToLocalStorage('Устанавливаем улучшенный резервный таймер');
 
         setInterval(() => {
             const orderId = localStorage.getItem('tilda_order_id');
@@ -511,12 +660,12 @@
 
             if (orderId && orderTime && !sent) {
                 const timePassed = Date.now() - parseInt(orderTime);
-                if (timePassed > 15000) { // 15 секунд прошло
+                if (timePassed > 10000) { // УМЕНЬШЕНО до 10 секунд
                     logToLocalStorage(`РЕЗЕРВНАЯ ОТПРАВКА: прошло ${Math.round(timePassed / 1000)} секунд`);
                     sendOrderToTelegram();
                 }
             }
-        }, 5000); // Проверяем каждые 5 секунд
+        }, 3000); // УМЕНЬШЕНО: Проверяем каждые 3 секунды
     }
 
     // Глобальные функции для тестирования
@@ -533,12 +682,18 @@
         },
 
         async checkProducts() {
+            const products = await getCurrentOrderProducts();
+            console.log('[TELEGRAM] Товары текущего заказа:', products);
+            return products;
+        },
+
+        async checkAllProducts() {
             if (window.TildaCartDB) {
                 try {
                     const db = new TildaCartDB();
                     await db.init();
                     const products = await db.getAllProducts();
-                    console.log('[TELEGRAM] Товары:', products);
+                    console.log('[TELEGRAM] ВСЕ товары в IndexedDB:', products);
                     return products;
                 } catch (error) {
                     console.error('[TELEGRAM] Ошибка IndexedDB:', error);
@@ -568,10 +723,10 @@
             localStorage.removeItem('tilda_customer_data');
             localStorage.removeItem('telegram_sent');
             localStorage.removeItem('order_created_time');
+            localStorage.removeItem('last_api_price');
             logToLocalStorage('localStorage очищен');
         },
 
-        // НОВАЯ ФУНКЦИЯ: Просмотр логов
         showLogs() {
             const logs = JSON.parse(localStorage.getItem('telegram_debug_logs') || '[]');
             console.log('=== TELEGRAM DEBUG LOGS ===');
@@ -579,64 +734,114 @@
             return logs;
         },
 
-        // НОВАЯ ФУНКЦИЯ: Очистка логов
         clearLogs() {
             localStorage.removeItem('telegram_debug_logs');
             logToLocalStorage('Логи очищены');
         },
 
-        // НОВАЯ ФУНКЦИЯ: Проверка статуса
         checkStatus() {
             const orderId = localStorage.getItem('tilda_order_id');
             const sent = localStorage.getItem('telegram_sent');
             const orderTime = localStorage.getItem('order_created_time');
+            const apiPrice = localStorage.getItem('last_api_price');
 
             const status = {
                 orderId,
                 sent: !!sent,
                 orderTime: orderTime ? new Date(parseInt(orderTime)).toLocaleString() : null,
+                apiPrice,
                 logsCount: JSON.parse(localStorage.getItem('telegram_debug_logs') || '[]').length
             };
 
             console.log('=== TELEGRAM STATUS ===', status);
             return status;
+        },
+
+        // НОВАЯ ФУНКЦИЯ: Принудительная очистка IndexedDB
+        async cleanupIndexedDB() {
+            await cleanupSentProducts();
+            console.log('[TELEGRAM] IndexedDB очищен принудительно');
+        },
+
+        // НОВАЯ ФУНКЦИЯ: Тест API перехвата
+        testApiIntercept() {
+            logToLocalStorage('ТЕСТ: Проверяем работу API перехвата');
+
+            // Делаем тестовый запрос к одному из возможных API
+            fetch('https://store.tildaapi.com/api/test', {
+                method: 'POST',
+                body: 'test=1'
+            }).catch(() => {
+                logToLocalStorage('ТЕСТ: Тестовый запрос выполнен (ошибка ожидаема)');
+            });
+        },
+
+        // НОВАЯ ФУНКЦИЯ: Диагностика всех состояний
+        async fullDiagnostic() {
+            console.log('=== ПОЛНАЯ ДИАГНОСТИКА TELEGRAM СКРИПТА ===');
+
+            const diagnostic = {
+                timestamp: new Date().toISOString(),
+                orderNumber: this.checkOrderNumber(),
+                customerData: this.checkCustomerData(),
+                currentProducts: await this.checkProducts(),
+                allProducts: await this.checkAllProducts(),
+                status: this.checkStatus(),
+                logs: this.showLogs()
+            };
+
+            console.log('ДИАГНОСТИКА ЗАВЕРШЕНА:', diagnostic);
+            return diagnostic;
         }
     };
 
     // Запускаем все при загрузке
     document.addEventListener('DOMContentLoaded', () => {
-        logToLocalStorage('DOM загружен, инициализируем скрипт');
+        logToLocalStorage('DOM загружен, инициализируем доработанный скрипт');
         interceptTildaResponse();
         setupBackupTimer();
     });
 
     // Если документ уже загружен
     if (document.readyState !== 'loading') {
-        logToLocalStorage('Документ уже загружен, инициализируем скрипт');
+        logToLocalStorage('Документ уже загружен, инициализируем доработанный скрипт');
         interceptTildaResponse();
         setupBackupTimer();
     }
 
     console.log(`
-=== TELEGRAM СКРИПТ С РАСШИРЕННОЙ ДИАГНОСТИКОЙ ===
+=== ДОРАБОТАННЫЙ TELEGRAM СКРИПТ ===
 Скрипт успешно загружен!
 
-НОВЫЕ ВОЗМОЖНОСТИ:
-• Логирование в localStorage (не пропадает при переходах)
-• Расширенный перехват URL (любые tilda API)
-• Резервная отправка по таймеру (через 15 секунд)
-• Подробная диагностика всех этапов
+УЛУЧШЕНИЯ:
+• Умная очистка IndexedDB (только отправленные товары)
+• Расширенный API перехват (больше endpoints)
+• Быстрая резервная отправка (10 секунд вместо 15)
+• Улучшенное получение цен из API
+• Фильтрация товаров по времени заказа
 
 КОМАНДЫ ДЛЯ ОТЛАДКИ:
 • window.telegramSimple.sendOrder() - принудительная отправка
 • window.telegramSimple.showLogs() - показать все логи
 • window.telegramSimple.checkStatus() - проверить статус заказа
+• window.telegramSimple.fullDiagnostic() - полная диагностика
+• window.telegramSimple.checkProducts() - товары текущего заказа
+• window.telegramSimple.checkAllProducts() - ВСЕ товары в IndexedDB
+• window.telegramSimple.cleanupIndexedDB() - принудительная очистка
+• window.telegramSimple.testApiIntercept() - тест API перехвата
 • window.telegramSimple.clearLogs() - очистить логи
 • window.telegramSimple.clearStorage() - очистить все данные
 
+НОВЫЕ ВОЗМОЖНОСТИ:
+• Отправка только товаров текущего заказа (не всех накопленных)
+• Автоматическая очистка после отправки
+• Более быстрое обнаружение заказов (10 сек вместо 60)
+• Сохранение цен из API ответов
+• Расширенный поиск номеров заказов в API
+
 ДИАГНОСТИКА ПОСЛЕ ЗАКАЗА:
 1. Вернитесь на сайт после оплаты
-2. Выполните window.telegramSimple.showLogs()
-3. Покажите результат - увидим что происходило
+2. Выполните window.telegramSimple.fullDiagnostic()
+3. Проверьте количество товаров: checkProducts() vs checkAllProducts()
 `);
 </script>
