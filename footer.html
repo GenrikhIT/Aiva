@@ -1,0 +1,625 @@
+<script>
+    /**
+     * Простой Telegram скрипт для футера
+     * РАЗМЕЩЕНИЕ: В FOOTER сайта (перед закрывающим </body>)
+     */
+
+    console.log('[TELEGRAM] ???? Простой скрипт загружен');
+
+    const TELEGRAM_BOT_TOKEN = '8111231642:AAE6FjAyI5B_zMcokXQ1KPpSU7ZZ2S76DXI';
+    const TELEGRAM_CHAT_ID = '481014845';
+
+    // Функция для конвертации base64 в Blob
+    function base64ToBlob(base64Data, contentType = '') {
+        const byteCharacters = atob(base64Data.split(',')[1]);
+        const byteNumbers = new Array(byteCharacters.length);
+
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+
+        const byteArray = new Uint8Array(byteNumbers);
+        return new Blob([byteArray], { type: contentType });
+    }
+
+    // Функция для получения данных клиента из форм
+    function getCustomerData() {
+        const customerData = {
+            name: 'Не указано',
+            email: 'Не указано',
+            phone: 'Не указано'
+        };
+
+        console.log('[TELEGRAM] ???? Поиск данных клиента...');
+
+        // Расширенный поиск по всем возможным селекторам
+        const nameSelectors = [
+            'input[name="name"]',
+            'input[name="Name"]',
+            'input[name="firstname"]',
+            'input[name="FirstName"]',
+            'input[placeholder*="имя"]',
+            'input[placeholder*="Имя"]',
+            'input[data-tilda-rule="name"]',
+            'input[data-field="name"]',
+            '.js-tilda-rule input[data-tilda-rule="name"]',
+            '.t-input[data-tilda-rule="name"]'
+        ];
+
+        const emailSelectors = [
+            'input[name="email"]',
+            'input[name="Email"]',
+            'input[type="email"]',
+            'input[data-tilda-rule="email"]',
+            'input[data-field="email"]',
+            '.js-tilda-rule input[data-tilda-rule="email"]',
+            '.t-input[data-tilda-rule="email"]'
+        ];
+
+        const phoneSelectors = [
+            'input[name="phone"]',
+            'input[name="Phone"]',
+            'input[name="tel"]',
+            'input[type="tel"]',
+            'input[data-tilda-rule="phone"]',
+            'input[data-field="phone"]',
+            '.js-tilda-rule input[data-tilda-rule="phone"]',
+            '.t-input[data-tilda-rule="phone"]'
+        ];
+
+        // Поиск имени
+        for (const selector of nameSelectors) {
+            const element = document.querySelector(selector);
+            if (element && element.value && element.value.trim()) {
+                customerData.name = element.value.trim();
+                console.log('[TELEGRAM] ✅ Имя найдено:', customerData.name, 'через селектор:', selector);
+                break;
+            }
+        }
+
+        // Поиск email
+        for (const selector of emailSelectors) {
+            const element = document.querySelector(selector);
+            if (element && element.value && element.value.trim()) {
+                customerData.email = element.value.trim();
+                console.log('[TELEGRAM] ✅ Email найден:', customerData.email, 'через селектор:', selector);
+                break;
+            }
+        }
+
+        // Поиск телефона
+        for (const selector of phoneSelectors) {
+            const element = document.querySelector(selector);
+            if (element && element.value && element.value.trim()) {
+                customerData.phone = element.value.trim();
+                console.log('[TELEGRAM] ✅ Телефон найден:', customerData.phone, 'через селектор:', selector);
+                break;
+            }
+        }
+
+        // Дополнительный поиск в последней отправленной форме
+        const lastForm = document.querySelector('.js-form-sent, .js-successbox');
+        if (lastForm) {
+            const parentForm = lastForm.closest('form') || lastForm.parentElement.querySelector('form');
+            if (parentForm) {
+                console.log('[TELEGRAM] ???? Проверяем последнюю отправленную форму');
+
+                const nameField = parentForm.querySelector('input[name*="name" i], input[data-tilda-rule="name"]');
+                const emailField = parentForm.querySelector('input[name*="email" i], input[data-tilda-rule="email"]');
+                const phoneField = parentForm.querySelector('input[name*="phone" i], input[data-tilda-rule="phone"]');
+
+                if (nameField && nameField.value && nameField.value.trim()) {
+                    customerData.name = nameField.value.trim();
+                    console.log('[TELEGRAM] ✅ Имя найдено в последней форме:', customerData.name);
+                }
+                if (emailField && emailField.value && emailField.value.trim()) {
+                    customerData.email = emailField.value.trim();
+                    console.log('[TELEGRAM] ✅ Email найден в последней форме:', customerData.email);
+                }
+                if (phoneField && phoneField.value && phoneField.value.trim()) {
+                    customerData.phone = phoneField.value.trim();
+                    console.log('[TELEGRAM] ✅ Телефон найден в последней форме:', customerData.phone);
+                }
+            }
+        }
+
+        // Поиск в корзине ST100
+        const cartForm = document.querySelector('.js-store-cart-form, .js-cart-form');
+        if (cartForm) {
+            console.log('[TELEGRAM] ???? Проверяем форму корзины ST100');
+
+            const cartNameField = cartForm.querySelector('input[name="name"], input[data-tilda-rule="name"]');
+            const cartEmailField = cartForm.querySelector('input[name="email"], input[data-tilda-rule="email"]');
+            const cartPhoneField = cartForm.querySelector('input[name="phone"], input[data-tilda-rule="phone"]');
+
+            if (cartNameField && cartNameField.value && cartNameField.value.trim()) {
+                customerData.name = cartNameField.value.trim();
+                console.log('[TELEGRAM] ✅ Имя найдено в корзине:', customerData.name);
+            }
+            if (cartEmailField && cartEmailField.value && cartEmailField.value.trim()) {
+                customerData.email = cartEmailField.value.trim();
+                console.log('[TELEGRAM] ✅ Email найден в корзине:', customerData.email);
+            }
+            if (cartPhoneField && cartPhoneField.value && cartPhoneField.value.trim()) {
+                customerData.phone = cartPhoneField.value.trim();
+                console.log('[TELEGRAM] ✅ Телефон найден в корзине:', customerData.phone);
+            }
+        }
+
+        console.log('[TELEGRAM] ???? Итоговые данные клиента:', customerData);
+        return customerData;
+    }
+
+    // Функция для получения номера заказа из ответа Tilda
+    function getOrderNumber() {
+        // Проверяем есть ли сохраненный номер заказа
+        const savedOrderId = localStorage.getItem('tilda_order_id');
+        if (savedOrderId) {
+            console.log('[TELEGRAM] ???? Найден сохраненный номер заказа:', savedOrderId);
+            return savedOrderId;
+        }
+
+        // Если нет сохраненного номера, возвращаем пустую строку
+        return '';
+    }
+
+    // Функция для перехвата ответов от Tilda API
+    function interceptTildaResponse() {
+        console.log('[TELEGRAM] ???? Устанавливаем перехват API ответов...');
+
+        // Перехватываем fetch запросы
+        const originalFetch = window.fetch;
+        window.fetch = async function (...args) {
+            const response = await originalFetch.apply(this, args);
+
+            // Проверяем, это ли запрос к Tilda API
+            const url = args[0] ? args[0].toString() : '';
+            if (url.includes('forms.tildaapi.com/procces/')) {
+                console.log('[TELEGRAM] ???? Перехвачен запрос к Tilda API:', url);
+
+                // Извлекаем данные из запроса
+                const requestData = args[1];
+                if (requestData && requestData.body) {
+                    console.log('[TELEGRAM] ???? Данные запроса:', requestData.body);
+
+                    try {
+                        // Парсим данные формы
+                        const formData = new URLSearchParams(requestData.body);
+
+                        // Сохраняем данные клиента
+                        const customerData = {
+                            name: formData.get('name') || formData.get('Name') || 'Не указано',
+                            email: formData.get('email') || formData.get('Email') || 'Не указано',
+                            phone: formData.get('phone') || formData.get('Phone') || 'Не указано'
+                        };
+
+                        // Ищем цену в данных
+                        let totalPrice = 0;
+                        for (const [key, value] of formData.entries()) {
+                            if (key.includes('price') || key.includes('Price') || key.includes('total')) {
+                                const priceMatch = value.match(/[\d.,]+/);
+                                if (priceMatch) {
+                                    totalPrice = parseFloat(priceMatch[0].replace(',', '.'));
+                                    console.log('[TELEGRAM] ???? Цена найдена в запросе:', totalPrice);
+                                }
+                            }
+                        }
+
+                        console.log('[TELEGRAM] ???? Данные клиента из запроса:', customerData);
+
+                        // Сохраняем данные в localStorage
+                        localStorage.setItem('tilda_customer_data', JSON.stringify(customerData));
+                        if (totalPrice > 0) {
+                            localStorage.setItem('tilda_order_price', totalPrice.toString());
+                        }
+
+                    } catch (error) {
+                        console.error('[TELEGRAM] ❌ Ошибка парсинга данных запроса:', error);
+                    }
+                }
+
+                try {
+                    // Клонируем ответ для чтения
+                    const clonedResponse = response.clone();
+                    const responseText = await clonedResponse.text();
+
+                    console.log('[TELEGRAM] ???? Ответ от Tilda:', responseText);
+
+                    // Парсим JSON ответ
+                    const responseData = JSON.parse(responseText);
+
+                    // Проверяем наличие results и извлекаем номер заказа
+                    if (responseData.results && responseData.results.length > 0) {
+                        const orderNumber = responseData.results[0];
+                        console.log('[TELEGRAM] ???? Найден номер заказа:', orderNumber);
+
+                        // Сохраняем номер заказа в localStorage
+                        localStorage.setItem('tilda_order_id', orderNumber);
+                        console.log('[TELEGRAM] ???? Номер заказа сохранен в localStorage');
+                    } else {
+                        console.log('[TELEGRAM] ⚠️ Номер заказа не найден в ответе');
+                    }
+
+                } catch (error) {
+                    console.error('[TELEGRAM] ❌ Ошибка парсинга ответа:', error);
+                }
+            }
+
+            return response;
+        };
+
+        // Также перехватываем XMLHttpRequest
+        const originalXHR = window.XMLHttpRequest;
+        function newXHR() {
+            const xhr = new originalXHR();
+            const originalSend = xhr.send;
+
+            xhr.send = function (data) {
+                // Перехватываем данные запроса
+                if (xhr._method === 'POST' && xhr._url && xhr._url.includes('forms.tildaapi.com/procces/')) {
+                    console.log('[TELEGRAM] ???? Перехвачен XHR POST запрос:', xhr._url);
+                    console.log('[TELEGRAM] ???? Данные XHR запроса:', data);
+
+                    if (data) {
+                        try {
+                            const formData = new URLSearchParams(data);
+
+                            // Сохраняем данные клиента
+                            const customerData = {
+                                name: formData.get('name') || formData.get('Name') || 'Не указано',
+                                email: formData.get('email') || formData.get('Email') || 'Не указано',
+                                phone: formData.get('phone') || formData.get('Phone') || 'Не указано'
+                            };
+
+                            // Ищем цену в данных
+                            let totalPrice = 0;
+                            for (const [key, value] of formData.entries()) {
+                                if (key.includes('price') || key.includes('Price') || key.includes('total')) {
+                                    const priceMatch = value.match(/[\d.,]+/);
+                                    if (priceMatch) {
+                                        totalPrice = parseFloat(priceMatch[0].replace(',', '.'));
+                                        console.log('[TELEGRAM] ???? Цена найдена в XHR запросе:', totalPrice);
+                                    }
+                                }
+                            }
+
+                            console.log('[TELEGRAM] ???? Данные клиента из XHR запроса:', customerData);
+
+                            // Сохраняем данные в localStorage
+                            localStorage.setItem('tilda_customer_data', JSON.stringify(customerData));
+                            if (totalPrice > 0) {
+                                localStorage.setItem('tilda_order_price', totalPrice.toString());
+                            }
+
+                        } catch (error) {
+                            console.error('[TELEGRAM] ❌ Ошибка парсинга XHR данных:', error);
+                        }
+                    }
+                }
+
+                // Перехватываем ответ
+                xhr.addEventListener('load', function () {
+                    if (xhr.responseURL && xhr.responseURL.includes('forms.tildaapi.com/procces/')) {
+                        console.log('[TELEGRAM] ???? Получен XHR ответ от Tilda API:', xhr.responseURL);
+
+                        try {
+                            const responseText = xhr.responseText;
+                            console.log('[TELEGRAM] ???? XHR ответ от Tilda:', responseText);
+
+                            const responseData = JSON.parse(responseText);
+
+                            if (responseData.results && responseData.results.length > 0) {
+                                const orderNumber = responseData.results[0];
+                                console.log('[TELEGRAM] ???? Найден номер заказа через XHR:', orderNumber);
+
+                                localStorage.setItem('tilda_order_id', orderNumber);
+                                console.log('[TELEGRAM] ???? Номер заказа сохранен в localStorage через XHR');
+                            }
+                        } catch (error) {
+                            console.error('[TELEGRAM] ❌ Ошибка парсинга XHR ответа:', error);
+                        }
+                    }
+                });
+
+                return originalSend.apply(this, arguments);
+            };
+
+            return xhr;
+        }
+
+        window.XMLHttpRequest = newXHR;
+        console.log('[TELEGRAM] ✅ Перехват API установлен (fetch + XHR)');
+    }
+
+    // Функция отправки заказа в Telegram
+    async function sendOrderToTelegram() {
+        console.log('[TELEGRAM] ???? Начинаем отправку заказа...');
+
+        // Получаем данные клиента
+        const customer = getCustomerData();
+
+        // Получаем номер заказа
+        const orderNumber = getOrderNumber();
+
+        let message = 'Новый заказ!\n\n';
+
+        // Добавляем номер заказа если есть
+        if (orderNumber) {
+            message += `Номер заказа: ${orderNumber}\n\n`;
+        }
+
+        message += `Клиент: ${customer.name}\n`;
+        message += `Email: ${customer.email}\n`;
+        message += `Телефон: ${customer.phone}\n`;
+        message += `Дата: ${new Date().toLocaleString('ru-RU')}\n\n`;
+
+        let files = [];
+        let totalAmount = 0; // Для подсчета общей суммы
+
+        // Получаем товары из IndexedDB
+        if (window.TildaCartDB) {
+            try {
+                const db = new TildaCartDB();
+                await db.init();
+                const products = await db.getAllProducts();
+
+                if (products.length > 0) {
+                    message += `Товары в заказе:\n`;
+                    products.forEach((product, i) => {
+                        message += `\n${i + 1}. ${product.productName || 'Товар'}\n`;
+                        if (product.text) {
+                            message += `Текст: ${product.text}\n`;
+                        }
+                        message += `SKU: ${product.sku || 'Не указан'}\n`;
+                        message += `Кол-во: 1\n`;
+
+                        // Используем цену из IndexedDB
+                        const productPrice = product.price || '0';
+                        message += `Цена: ${productPrice} РУБ\n`;
+
+                        // Добавляем к общей сумме
+                        const priceNumber = parseFloat(productPrice.toString().replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+                        totalAmount += priceNumber;
+
+                        // Подготавливаем файл
+                        if (product.file && product.file.data) {
+                            const blob = base64ToBlob(product.file.data, product.file.type);
+                            files.push({
+                                name: product.file.name || 'file.jpg',
+                                blob: blob,
+                                productName: product.productName || 'Товар'
+                            });
+                            message += `К товару прикреплен файл\n`;
+                        }
+                    });
+
+                    if (files.length > 0) {
+                        message += `\nВсего файлов: ${files.length}\n`;
+                    }
+
+                    // Используем рассчитанную общую сумму
+                    message += `\nОбщая сумма: ${totalAmount} РУБ\n`;
+
+                    console.log('[TELEGRAM] ???? Рассчитанная сумма:', totalAmount);
+
+                } else {
+                    message += `Товары: Не найдены\n`;
+                }
+            } catch (error) {
+                console.error('[TELEGRAM] Ошибка получения товаров:', error);
+                message += `Ошибка получения товаров: ${error.message}\n`;
+            }
+        } else {
+            message += `IndexedDB недоступен\n`;
+        }
+
+        try {
+            // 1. Отправляем текстовое сообщение
+            const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: TELEGRAM_CHAT_ID,
+                    text: message
+                })
+            });
+
+            const result = await response.json();
+            if (!result.ok) {
+                console.error('[TELEGRAM] Ошибка отправки сообщения:', result.description);
+                return false;
+            }
+
+            console.log('[TELEGRAM] ✅ Сообщение отправлено!');
+
+            // 2. Отправляем файлы
+            if (files.length > 0) {
+                for (let fileObj of files) {
+                    const formData = new FormData();
+                    formData.append('chat_id', TELEGRAM_CHAT_ID);
+                    formData.append('caption', `${fileObj.productName} - ${fileObj.name}`);
+                    formData.append('document', fileObj.blob, fileObj.name);
+
+                    try {
+                        const fileResp = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const fileJson = await fileResp.json();
+                        if (fileJson.ok) {
+                            console.log('[TELEGRAM] ✅ Файл отправлен:', fileObj.name);
+                        } else {
+                            console.error('[TELEGRAM] Ошибка отправки файла:', fileJson.description);
+                        }
+                    } catch (fileError) {
+                        console.error('[TELEGRAM] Сетевая ошибка файла:', fileError);
+                    }
+                }
+            }
+
+            // 3. Очищаем IndexedDB и данные
+            if (window.TildaCartDB) {
+                try {
+                    const db = new TildaCartDB();
+                    await db.init();
+                    await db.clearAllProducts();
+                    console.log('[TELEGRAM] ????️ IndexedDB очищен');
+
+                    // Очищаем сохраненные данные
+                    localStorage.removeItem('tilda_order_id');
+                    localStorage.removeItem('tilda_customer_data');
+                    localStorage.removeItem('tilda_order_price');
+                    console.log('[TELEGRAM] ????️ Данные заказа очищены');
+                } catch (error) {
+                    console.error('[TELEGRAM] Ошибка очистки IndexedDB:', error);
+                }
+            }
+
+            return true;
+
+        } catch (error) {
+            console.error('[TELEGRAM] Сетевая ошибка:', error);
+            return false;
+        }
+    }
+
+    // Отслеживание блока "Спасибо"
+    function watchSuccessBox() {
+        const checkSuccess = () => {
+            const successBox = document.querySelector('.js-successbox');
+            if (successBox && getComputedStyle(successBox).display !== 'none' && !successBox.dataset.sent) {
+                successBox.dataset.sent = 'true';
+                console.log('[TELEGRAM] ???? Блок Спасибо найден! Отправляем заказ...');
+
+                setTimeout(() => {
+                    sendOrderToTelegram();
+                }, 500);
+            }
+        };
+
+        setInterval(checkSuccess, 1000);
+
+        const observer = new MutationObserver(checkSuccess);
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // Глобальные функции для тестирования
+    window.telegramSimple = {
+        async sendOrder() {
+            console.log('[TELEGRAM] ???? Принудительная отправка заказа...');
+            return await sendOrderToTelegram();
+        },
+
+        checkCustomerData() {
+            const customer = getCustomerData();
+            console.log('[TELEGRAM] ???? Данные клиента:', customer);
+            return customer;
+        },
+
+        async checkProducts() {
+            if (window.TildaCartDB) {
+                try {
+                    const db = new TildaCartDB();
+                    await db.init();
+                    const products = await db.getAllProducts();
+                    console.log('[TELEGRAM] ???? Товары:', products);
+                    return products;
+                } catch (error) {
+                    console.error('[TELEGRAM] Ошибка IndexedDB:', error);
+                    return [];
+                }
+            } else {
+                console.log('[TELEGRAM] TildaCartDB недоступен');
+                return [];
+            }
+        },
+
+        // Новая функция для проверки номера заказа
+        checkOrderNumber() {
+            const orderNumber = getOrderNumber();
+            console.log('[TELEGRAM] ???? Номер заказа:', orderNumber);
+            return orderNumber;
+        },
+
+        // Ручная установка номера заказа для тестирования
+        setOrderNumber(orderNumber) {
+            localStorage.setItem('tilda_order_id', orderNumber);
+            console.log('[TELEGRAM] ???? Номер заказа установлен:', orderNumber);
+        },
+
+        // Диагностика всех форм на странице
+        debugForms() {
+            console.log('[TELEGRAM] ???? ДИАГНОСТИКА ФОРМ НА СТРАНИЦЕ:');
+
+            const forms = document.querySelectorAll('form');
+            console.log(`Найдено форм: ${forms.length}`);
+
+            forms.forEach((form, i) => {
+                console.log(`\n???? Форма ${i + 1}:`);
+
+                const inputs = form.querySelectorAll('input');
+                inputs.forEach(input => {
+                    console.log(`  • ${input.type || 'text'}: name="${input.name}", value="${input.value}", placeholder="${input.placeholder}"`);
+                });
+            });
+
+            // Проверяем все input поля на странице
+            console.log('\n???? ВСЕ INPUT ПОЛЯ НА СТРАНИЦЕ:');
+            const allInputs = document.querySelectorAll('input[type="text"], input[type="email"], input[type="tel"], input[name*="name"], input[name*="email"], input[name*="phone"]');
+            allInputs.forEach(input => {
+                if (input.value && input.value.trim()) {
+                    console.log(`  ✅ ${input.type || 'text'}: name="${input.name}", value="${input.value}", data-tilda-rule="${input.dataset.tildaRule}"`);
+                }
+            });
+        },
+
+        // Диагностика цен в Telegram скрипте  
+        async debugPrices() {
+            if (window.TildaCartDB) {
+                try {
+                    const db = new TildaCartDB();
+                    await db.init();
+                    const products = await db.getAllProducts();
+
+                    console.log('[TELEGRAM] ???? ДИАГНОСТИКА ЦЕН:');
+                    let total = 0;
+
+                    products.forEach((product, i) => {
+                        const price = product.price || '0';
+                        const priceNumber = parseFloat(price.toString().replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+                        total += priceNumber;
+
+                        console.log(`${i + 1}. ${product.productName}`);
+                        console.log(`   Цена (строка): "${price}"`);
+                        console.log(`   Цена (число): ${priceNumber}`);
+                        console.log(`   SKU: ${product.sku}`);
+                    });
+
+                    console.log(`???? Итого: ${total} РУБ`);
+                    return { products, total };
+
+                } catch (error) {
+                    console.error('[TELEGRAM] Ошибка IndexedDB:', error);
+                    return { products: [], total: 0 };
+                }
+            } else {
+                console.log('[TELEGRAM] TildaCartDB недоступен');
+                return { products: [], total: 0 };
+            }
+        }
+    };
+
+    // Запускаем перехват ответов и отслеживание
+    document.addEventListener('DOMContentLoaded', () => {
+        interceptTildaResponse();
+        watchSuccessBox();
+    });
+
+    if (document.readyState !== 'loading') {
+        interceptTildaResponse();
+        watchSuccessBox();
+    }
+
+    console.log('[TELEGRAM] ✅ Готово! Функции: window.telegramSimple.sendOrder(), .checkCustomerData(), .checkProducts(), .checkOrderNumber(), .debugForms(), .debugPrices()');
+</script>

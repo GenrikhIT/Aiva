@@ -1,0 +1,560 @@
+<script>
+    /**
+     * Логический скрипт для карточки холста - функционал и сохранение
+     * РАЗМЕЩЕНИЕ: В блоке HTML карточки товара (вторым, после UI скрипта)
+     */
+    // === Функции для работы с данными ===
+    function getProductSku(container) {
+        const selectors = [
+            '.js-store-prod-sku',
+            '[data-product-sku]',
+            '.t744__sku',
+            '.js-product-sku',
+            '.t-product__sku',
+            '.js-product .t-product__sku'
+        ];
+
+        for (const selector of selectors) {
+            const element = container.querySelector(selector);
+            if (element) {
+                const sku = element.textContent || element.dataset.productSku || element.value;
+                if (sku && sku.trim()) {
+                    console.log('✅ SKU найден:', sku.trim(), 'через селектор:', selector);
+                    return sku.trim();
+                }
+            }
+        }
+
+        // Попытка найти SKU в атрибутах контейнера
+        const productData = container.querySelector('[data-product-sku]');
+        if (productData) {
+            const sku = productData.dataset.productSku;
+            if (sku && sku.trim()) {
+                console.log('✅ SKU найден в data-атрибуте:', sku.trim());
+                return sku.trim();
+            }
+        }
+
+        // Попытка извлечь из URL
+        const url = window.location.href;
+        const urlMatch = url.match(/\/([^\/\?]+)(?:\?|$)/);
+        if (urlMatch && urlMatch[1] && urlMatch[1] !== '') {
+            console.log('⚠️ SKU не найден стандартным способом, используем из URL:', urlMatch[1]);
+            return urlMatch[1];
+        }
+
+        console.error('❌ SKU не найден никаким способом');
+        return null;
+    }
+    function getProductPrice(container) {
+        const priceSelectors = [
+            '.js-product-price',
+            '.js-store-prod-price-val',
+            '.t744__price-value',
+            '.t-product__price-value',
+            '.js-product .t-product__price-value',
+            '.t744__price',
+            '.t-store__prod-price',
+            '[data-product-price]',
+            '.js-store-prod-price',
+            '.t744__price-main',
+            '.t-product__price',
+            '.js-product-price-def'
+        ];
+
+        for (const selector of priceSelectors) {
+            const element = container.querySelector(selector);
+            if (element) {
+                // Получаем текст и очищаем от лишних символов
+                let priceText = element.textContent || element.value || element.dataset.productPrice;
+                if (priceText) {
+                    // Убираем все символы кроме цифр и точек/запятых
+                    const cleanPrice = priceText.replace(/[^\d.,]/g, '');
+                    if (cleanPrice) {
+                        console.log('✅ Цена найдена:', cleanPrice, 'через селектор:', selector);
+                        return cleanPrice;
+                    }
+                }
+            }
+        }
+
+        // Попытка найти в data-атрибутах
+        const productData = container.querySelector('[data-product-price]');
+        if (productData && productData.dataset.productPrice) {
+            console.log('✅ Цена найдена в data-атрибуте:', productData.dataset.productPrice);
+            return productData.dataset.productPrice;
+        }
+
+        // Попытка найти через Tilda API
+        if (window.tcart && window.tcart.products) {
+            const sku = getProductSku(container);
+            if (sku && window.tcart.products[sku]) {
+                const price = window.tcart.products[sku].price;
+                if (price) {
+                    console.log('✅ Цена найдена через Tilda API:', price);
+                    return price;
+                }
+            }
+        }
+
+        // Попытка найти цену в глобальных переменных Tilda
+        if (window.t744 && window.t744.el && window.t744.el.price) {
+            console.log('✅ Цена найдена через t744:', window.t744.el.price);
+            return window.t744.el.price;
+        }
+
+        console.error('❌ Цена не найдена');
+        return null;
+    }
+    function getCartDB() {
+        // Ждем пока загрузится глобальный класс TildaCartDB из скрипта корзины
+        if (window.TildaCartDB) {
+            console.log('✅ Глобальный TildaCartDB найден');
+            return new window.TildaCartDB();
+        }
+
+        console.warn('⚠️ Глобальный TildaCartDB не найден, ждем загрузки скрипта корзины...');
+
+        // Возвращаем Promise, который будет ждать загрузки TildaCartDB
+        return {
+            _waitForTildaCartDB() {
+                return new Promise((resolve, reject) => {
+                    let attempts = 0;
+                    const maxAttempts = 50; // 5 секунд ожидания
+
+                    const checkInterval = setInterval(() => {
+                        attempts++;
+
+                        if (window.TildaCartDB) {
+                            clearInterval(checkInterval);
+                            resolve(new window.TildaCartDB());
+                        } else if (attempts >= maxAttempts) {
+                            clearInterval(checkInterval);
+                            reject(new Error('TildaCartDB не загружен. Убедитесь, что скрипт корзины загружается первым.'));
+                        }
+                    }, 100);
+                });
+            },
+
+            async init() {
+                const db = await this._waitForTildaCartDB();
+                return db.init();
+            },
+
+            async saveProduct(data) {
+                const db = await this._waitForTildaCartDB();
+                return db.saveProduct(data);
+            },
+
+            async getAllProducts() {
+                const db = await this._waitForTildaCartDB();
+                return db.getAllProducts();
+            },
+
+            async clearAllProducts() {
+                const db = await this._waitForTildaCartDB();
+                return db.clearAllProducts();
+            },
+
+            async getProductBySku(sku) {
+                const db = await this._waitForTildaCartDB();
+                return db.getProductBySku(sku);
+            },
+
+            async removeProductBySku(sku) {
+                const db = await this._waitForTildaCartDB();
+                return db.removeProductBySku(sku);
+            }
+        };
+    }
+    // === Основной логический скрипт ===
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('🖼️ Логический скрипт холста запущен');
+        let initAttempts = 0;
+        const maxAttempts = 15;
+
+        function initializeLogic() {
+            initAttempts++;
+            console.log(`🔧 Логическая инициализация ${initAttempts}/${maxAttempts}`);
+
+            const productContainer = document.getElementById('rec1174632996');
+
+            if (!productContainer) {
+                console.warn('❌ Контейнер rec1174632996 не найден для логики');
+                return false;
+            }
+            console.log('✅ Контейнер найден для логики:', productContainer);
+            // Проверяем наличие опции изображения
+            const imageOption = productContainer.querySelector('.js-product-edition-option[data-edition-option-id="Изображение"]');
+
+            if (!imageOption) {
+                console.warn('❌ Опция изображения не найдена для логики');
+                return false;
+            }
+            setupLogic(productContainer);
+            return true;
+        }
+        // Пробуем инициализацию с задержкой, чтобы UI успел загрузиться
+        setTimeout(() => {
+            if (!initializeLogic()) {
+                console.log('⏳ Ожидание загрузки для логики...');
+
+                const checkInterval = setInterval(() => {
+                    if (initializeLogic()) {
+                        clearInterval(checkInterval);
+                    } else if (initAttempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        console.error('❌ Не удалось инициализировать логику после множества попыток');
+                    }
+                }, 1000);
+            }
+        }, 500);
+        function setupLogic(productContainer) {
+            console.log('⚙️ Настраиваем логику...');
+
+            // Инициализируем базу данных
+            const cartDB = getCartDB();
+            cartDB.init().catch(console.error);
+            // === Обработка добавления в корзину ===
+            function setupCartHandler() {
+                const cartBtn = productContainer.querySelector('.js-store-prod-buy-btn-txt');
+                if (!cartBtn) return false;
+                const btn = cartBtn.closest('.t744__btn');
+                if (!btn) return false;
+                console.log('🛒 Устанавливаем обработчик корзины');
+                btn.addEventListener('click', async function (e) {
+                    console.log('🛒 Кнопка "в корзину" нажата');
+
+                    try {
+                        // Получаем SKU
+                        const sku = getProductSku(productContainer);
+                        if (!sku) {
+                            e.preventDefault();
+                            if (window.showNotification) {
+                                window.showNotification('Ошибка: не удалось определить артикул товара', 'error');
+                            } else {
+                                alert('Ошибка: не удалось определить артикул товара');
+                            }
+                            return;
+                        }
+                        // Получаем файл
+                        const fileInput = productContainer.querySelector('.aiva-file-input');
+                        const file = fileInput && fileInput.files[0] ? fileInput.files[0] : null;
+
+                        // Проверяем обязательность файла
+                        if (!file) {
+                            e.preventDefault();
+                            if (window.showNotification) {
+                                window.showNotification('Пожалуйста, загрузите фото своего питомца', 'warning');
+                            } else {
+                                alert('Пожалуйста, загрузите фото своего питомца');
+                            }
+                            return;
+                        }
+                        // Получаем название товара
+                        const productNameElement = productContainer.querySelector('.js-product-name');
+                        const productName = productNameElement ? productNameElement.textContent.trim() : '';
+                        // Получаем АКТУАЛЬНУЮ цену
+                        const productPrice = getProductPrice(productContainer);
+                        console.log('🖼️ Сохраняем данные товара:', {
+                            sku, productName, price: productPrice, hasFile: !!file
+                        });
+                        // Показываем индикатор сохранения
+                        const saveIndicator = document.createElement('div');
+                        saveIndicator.className = 'aiva-save-indicator';
+                        saveIndicator.textContent = 'Сохраняем кастомизацию...';
+                        btn.appendChild(saveIndicator);
+                        try {
+                            // Конвертируем файл в base64 БЕЗ СЖАТИЯ
+                            const fileBase64 = await new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(file);
+                            });
+
+                            // Сохраняем данные в IndexedDB
+                            const productData = {
+                                sku: sku,
+                                productName: productName,
+                                price: productPrice, // Добавляем актуальную цену
+                                file: {
+                                    name: file.name,
+                                    size: file.size,
+                                    type: file.type,
+                                    data: fileBase64
+                                },
+                                text: '', // Для холста текст не нужен
+                                timestamp: Date.now()
+                            };
+                            await cartDB.saveProduct(productData);
+
+                            console.log('✅ Данные товара сохранены в IndexedDB');
+
+                            // Убираем индикатор сохранения
+                            saveIndicator.remove();
+
+                            // Показываем подтверждение
+                            if (window.showNotification) {
+                                window.showNotification('✅ Ваша кастомизация сохранена!');
+                            }
+
+                            // НЕ блокируем стандартное добавление в корзину
+
+                        } catch (saveError) {
+                            console.error('❌ Ошибка сохранения в IndexedDB:', saveError);
+                            saveIndicator.remove();
+
+                            // Показываем ошибку, но не блокируем добавление в корзину
+                            if (window.showNotification) {
+                                window.showNotification('⚠️ Не удалось сохранить кастомизацию', 'error');
+                            }
+                        }
+
+                    } catch (error) {
+                        console.error('❌ Критическая ошибка при обработке:', error);
+                        e.preventDefault();
+                        if (window.showNotification) {
+                            window.showNotification('Ошибка: ' + error.message, 'error');
+                        } else {
+                            alert('Ошибка: ' + error.message);
+                        }
+                    }
+                });
+                return true;
+            }
+            // Устанавливаем обработчик корзины
+            setTimeout(() => {
+                if (!setupCartHandler()) {
+                    console.log('⏳ Обработчик корзины не готов, наблюдаем за изменениями...');
+                    const observer = new MutationObserver(() => {
+                        if (setupCartHandler()) {
+                            console.log('✅ Обработчик корзины установлен через observer');
+                            observer.disconnect();
+                        }
+                    });
+                    observer.observe(productContainer, { childList: true, subtree: true });
+                }
+            }, 1000);
+        }
+        // === Глобальные функции для отладки ===
+        window.debugCanvas = {
+            async checkStorage() {
+                try {
+                    const cartDB = getCartDB();
+                    const products = await cartDB.getAllProducts();
+                    console.log('🗄️ Товары в IndexedDB:', products);
+                    return products;
+                } catch (error) {
+                    console.error('❌ Ошибка чтения IndexedDB:', error);
+                    return [];
+                }
+            },
+            async clearStorage() {
+                try {
+                    const cartDB = getCartDB();
+                    await cartDB.clearAllProducts();
+                    console.log('🗑️ IndexedDB очищено');
+                } catch (error) {
+                    console.error('❌ Ошибка очистки IndexedDB:', error);
+                }
+            },
+            checkSku() {
+                const container = document.getElementById('rec1174632996');
+                if (container) {
+                    const sku = getProductSku(container);
+                    console.log('🏷️ SKU товара:', sku);
+                    return sku;
+                }
+                return null;
+            },
+            checkPrice() {
+                const container = document.getElementById('rec1174632996');
+                if (container) {
+                    const price = getProductPrice(container);
+                    console.log('💰 Цена товара:', price);
+                    return price;
+                }
+                return null;
+            },
+            async checkProductBySku(sku) {
+                try {
+                    const cartDB = getCartDB();
+                    const product = await cartDB.getProductBySku(sku);
+                    console.log('📦 Товар по SKU:', sku, product);
+                    return product;
+                } catch (error) {
+                    console.error('❌ Ошибка поиска товара:', error);
+                    return null;
+                }
+            },
+            async removeProductBySku(sku) {
+                try {
+                    const cartDB = getCartDB();
+                    await cartDB.removeProductBySku(sku);
+                    console.log('🗑️ Товар удален по SKU:', sku);
+                } catch (error) {
+                    console.error('❌ Ошибка удаления товара:', error);
+                }
+            },
+            async refreshProductData() {
+                try {
+                    const container = document.getElementById('rec1174632996');
+                    if (!container) return;
+
+                    const sku = getProductSku(container);
+                    if (!sku) return;
+
+                    const cartDB = getCartDB();
+
+                    // Удаляем старые данные для этого SKU
+                    await cartDB.removeProductBySku(sku);
+                    console.log('🗑️ Старые данные удалены для SKU:', sku);
+
+                    // Проверяем актуальную цену
+                    const currentPrice = getProductPrice(container);
+                    console.log('💰 Актуальная цена:', currentPrice);
+
+                } catch (error) {
+                    console.error('❌ Ошибка обновления данных:', error);
+                }
+            },
+            async simulateAddToCart() {
+                const container = document.getElementById('rec1174632996');
+                if (!container) return false;
+
+                const sku = getProductSku(container);
+                const price = getProductPrice(container);
+                const fileInput = container.querySelector('.aiva-file-input');
+
+                console.log('🛒 Симуляция добавления в корзину:', {
+                    sku,
+                    price,
+                    hasFile: !!(fileInput && fileInput.files[0])
+                });
+
+                return true;
+            },
+            async testIndexedDB() {
+                try {
+                    const cartDB = getCartDB();
+                    await cartDB.init();
+
+                    // Тестовые данные
+                    const testData = {
+                        sku: 'TEST_CANVAS_' + Date.now(),
+                        productName: 'Тестовый холст',
+                        price: '6900',
+                        text: '',
+                        file: {
+                            name: 'test.jpg',
+                            size: 1024,
+                            type: 'image/jpeg',
+                            data: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k='
+                        }
+                    };
+
+                    console.log('💾 Сохраняем тестовые данные...');
+                    await cartDB.saveProduct(testData);
+
+                    console.log('📖 Читаем все данные...');
+                    const allProducts = await cartDB.getAllProducts();
+                    console.log('📦 Все товары:', allProducts);
+
+                    console.log('🔍 Ищем по SKU...');
+                    const foundProduct = await cartDB.getProductBySku(testData.sku);
+                    console.log('📦 Найденный товар:', foundProduct);
+
+                    console.log('🗑️ Удаляем тестовые данные...');
+                    await cartDB.removeProductBySku(testData.sku);
+
+                    console.log('✅ Тест IndexedDB завершен успешно');
+                    return true;
+
+                } catch (error) {
+                    console.error('❌ Ошибка тестирования IndexedDB:', error);
+                    return false;
+                }
+            },
+            // Диагностика всех элементов цены на странице
+            debugPriceElements() {
+                const container = document.getElementById('rec1174632996');
+                if (!container) return;
+
+                console.log('💰 ДИАГНОСТИКА ЭЛЕМЕНТОВ ЦЕНЫ:');
+
+                // Проверяем все возможные селекторы
+                const allSelectors = [
+                    '.js-product-price',
+                    '.js-store-prod-price-val',
+                    '.t744__price-value',
+                    '.t-product__price-value',
+                    '.js-product .t-product__price-value',
+                    '.t744__price',
+                    '.t-store__prod-price',
+                    '[data-product-price]',
+                    '.js-store-prod-price',
+                    '.t744__price-main',
+                    '.t-product__price',
+                    '.js-product-price-def'
+                ];
+
+                allSelectors.forEach(selector => {
+                    const elements = container.querySelectorAll(selector);
+                    if (elements.length > 0) {
+                        console.log(`💰 ${selector}:`, Array.from(elements).map(el => ({
+                            text: el.textContent,
+                            value: el.value,
+                            dataset: el.dataset
+                        })));
+                    }
+                });
+
+                // Проверяем глобальные переменные
+                console.log('🌐 Глобальные переменные:');
+                if (window.tcart) console.log('tcart:', window.tcart);
+                if (window.t744) console.log('t744:', window.t744);
+            }
+        };
+        // НЕ объявляем TildaCartDB снова - используем только из скрипта корзины
+        console.log('ℹ️ Логический скрипт холста использует TildaCartDB из скрипта корзины');
+    });
+    console.log(`
+=== ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ ЛОГИЧЕСКОГО СКРИПТА ХОЛСТА ===
+🖼️ Логический скрипт холста успешно загружен!
+🚀 ОСНОВНЫЕ ВОЗМОЖНОСТИ:
+• Сохранение файлов в IndexedDB
+• Интеграция с корзиной Tilda
+• Обработка изображений питомцев
+• Получение SKU товара
+• Получение актуальной цены товара
+🔧 КОМАНДЫ ДЛЯ ОТЛАДКИ:
+• window.debugCanvas.checkStorage() - проверить все сохраненные данные
+• window.debugCanvas.clearStorage() - очистить IndexedDB
+• window.debugCanvas.checkSku() - проверить SKU текущего товара
+• window.debugCanvas.checkPrice() - проверить цену текущего товара
+• window.debugCanvas.checkProductBySku('SKU') - найти товар по SKU
+• window.debugCanvas.removeProductBySku('SKU') - удалить товар по SKU
+• window.debugCanvas.refreshProductData() - очистить старые данные и проверить актуальную цену
+• window.debugCanvas.simulateAddToCart() - симулировать добавление в корзину
+• window.debugCanvas.testIndexedDB() - протестировать IndexedDB
+• window.debugCanvas.debugPriceElements() - диагностика всех элементов цены
+📂 ХРАНЕНИЕ ДАННЫХ:
+• Использует только IndexedDB (localStorage отключен)
+• Изображения сохраняются БЕЗ СЖАТИЯ в оригинальном качестве
+• Данные связываются с товарами по SKU
+• Автоматическое обновление при повторном добавлении
+• Сохранение актуальной цены товара
+⚠️ ВАЖНЫЕ ЗАМЕЧАНИЯ:
+• Скрипт НЕ блокирует стандартное добавление в корзину Tilda
+• Файл обязателен для загрузки
+• Работает только с rec1174632996
+• Требует предварительной загрузки UI скрипта
+• Цена читается в момент добавления в корзину
+🛠️ ДИАГНОСТИКА ПРОБЛЕМ С ЦЕНОЙ:
+1. Выполните window.debugCanvas.debugPriceElements() для диагностики
+2. Проверьте window.debugCanvas.checkPrice() на странице товара
+3. Очистите старые данные через window.debugCanvas.refreshProductData()
+4. Проверьте данные в хранилище через window.debugCanvas.checkStorage()
+`);
+</script>
