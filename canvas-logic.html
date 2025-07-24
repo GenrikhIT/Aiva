@@ -1,0 +1,252 @@
+<script>
+    /**
+     * Логический скрипт для карточки товара - функционал и сохранение
+     * РАЗМЕЩЕНИЕ: В блоке HTML карточки товара (вторым, после UI скрипта)
+     */
+
+    // === Функции для работы с данными ===
+    function getProductSku(container) {
+        const selectors = [
+            '.js-store-prod-sku',
+            '[data-product-sku]',
+            '.t744__sku',
+            '.js-product-sku',
+            '.t-product__sku',
+            '.js-product .t-product__sku'
+        ];
+
+        for (const selector of selectors) {
+            const element = container.querySelector(selector);
+            if (element) {
+                const sku = element.textContent || element.dataset.productSku || element.value;
+                if (sku && sku.trim()) {
+                    console.log('✅ SKU найден:', sku.trim(), 'через селектор:', selector);
+                    return sku.trim();
+                }
+            }
+        }
+
+        const productData = container.querySelector('[data-product-sku]');
+        if (productData) {
+            const sku = productData.dataset.productSku;
+            if (sku && sku.trim()) {
+                console.log('✅ SKU найден в data-атрибуте:', sku.trim());
+                return sku.trim();
+            }
+        }
+
+        const url = window.location.href;
+        const urlMatch = url.match(/\/([^\/\?]+)(?:\?|$)/);
+        if (urlMatch && urlMatch[1] && urlMatch[1] !== '') {
+            console.log('⚠️ SKU не найден стандартным способом, используем из URL:', urlMatch[1]);
+            return urlMatch[1];
+        }
+
+        console.error('❌ SKU не найден никаким способом');
+        return null;
+    }
+
+    function getCartDB() {
+        if (window.TildaCartDB) {
+            console.log('✅ Глобальный TildaCartDB найден');
+            return new window.TildaCartDB();
+        }
+
+        console.warn('⚠️ Глобальный TildaCartDB не найден, ждем загрузки скрипта корзины...');
+
+        return {
+            _waitForTildaCartDB() {
+                return new Promise((resolve, reject) => {
+                    let attempts = 0;
+                    const maxAttempts = 50;
+                    const checkInterval = setInterval(() => {
+                        attempts++;
+                        if (window.TildaCartDB) {
+                            clearInterval(checkInterval);
+                            resolve(new window.TildaCartDB());
+                        } else if (attempts >= maxAttempts) {
+                            clearInterval(checkInterval);
+                            reject(new Error('TildaCartDB не загружен. Убедитесь, что скрипт корзины загружается первым.'));
+                        }
+                    }, 100);
+                });
+            },
+            async init() {
+                const db = await this._waitForTildaCartDB();
+                return db.init();
+            },
+            async saveProduct(data) {
+                const db = await this._waitForTildaCartDB();
+                return db.saveProduct(data);
+            },
+            async getAllProducts() {
+                const db = await this._waitForTildaCartDB();
+                return db.getAllProducts();
+            },
+            async clearAllProducts() {
+                const db = await this._waitForTildaCartDB();
+                return db.clearAllProducts();
+            },
+            async getProductBySku(sku) {
+                const db = await this._waitForTildaCartDB();
+                return db.getProductBySku(sku);
+            },
+            async removeProductBySku(sku) {
+                const db = await this._waitForTildaCartDB();
+                return db.removeProductBySku(sku);
+            }
+        };
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('???? Логический скрипт товара запущен');
+
+        let initAttempts = 0;
+        const maxAttempts = 15;
+
+        function initializeLogic() {
+            initAttempts++;
+            console.log(`???? Логическая инициализация ${initAttempts}/${maxAttempts}`);
+
+            const productContainer = document.querySelector('.js-product.js-product-single') ||
+                document.querySelector('.t744') ||
+                document.querySelector('.js-product-controls-wrapper');
+
+            if (!productContainer) {
+                console.warn('❌ Контейнер товара не найден для логики');
+                return false;
+            }
+
+            console.log('✅ Контейнер товара найден для логики:', productContainer);
+
+            const imageOption = productContainer.querySelector('.js-product-edition-option[data-edition-option-id="Изображение"]');
+            const textOption = productContainer.querySelector('.js-product-edition-option[data-edition-option-id="Добавь имя или надпись"]');
+
+            if (!imageOption && !textOption) {
+                console.warn('❌ Опции товара не найдены для логики');
+                return false;
+            }
+
+            setupLogic(productContainer);
+            return true;
+        }
+
+        setTimeout(() => {
+            if (!initializeLogic()) {
+                console.log('⏳ Ожидание загрузки для логики...');
+                const checkInterval = setInterval(() => {
+                    if (initializeLogic()) {
+                        clearInterval(checkInterval);
+                    } else if (initAttempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        console.error('❌ Не удалось инициализировать логику после множества попыток');
+                    }
+                }, 1000);
+            }
+        }, 500);
+
+        function setupLogic(productContainer) {
+            console.log('⚙️ Настраиваем логику...');
+            const cartDB = getCartDB();
+            cartDB.init().catch(console.error);
+
+            function setupCartHandler() {
+                const cartBtn = productContainer.querySelector('.js-store-prod-buy-btn-txt');
+                if (!cartBtn) return false;
+
+                const btn = cartBtn.closest('.t744__btn');
+                if (!btn) return false;
+
+                console.log('???? Устанавливаем обработчик корзины');
+
+                btn.addEventListener('click', async function (e) {
+                    console.log('???? Кнопка "в корзину" нажата');
+
+                    try {
+                        const sku = getProductSku(productContainer);
+                        if (!sku) {
+                            e.preventDefault();
+                            window.showNotification?.('Ошибка: не удалось определить артикул товара', 'error') || alert('Ошибка: не удалось определить артикул товара');
+                            return;
+                        }
+
+                        const fileInput = productContainer.querySelector('.aiva-file-input');
+                        const file = fileInput?.files[0] || null;
+
+                        if (!file) {
+                            e.preventDefault();
+                            window.showNotification?.('Пожалуйста, загрузите фото своего питомца', 'warning') || alert('Пожалуйста, загрузите фото своего питомца');
+                            return;
+                        }
+
+                        const textInput = productContainer.querySelector('.aiva-text-input-inline');
+                        const text = textInput ? textInput.value.trim() : '';
+                        const productNameElement = productContainer.querySelector('.js-product-name');
+                        const productName = productNameElement ? productNameElement.textContent.trim() : '';
+
+                        console.log('???? Сохраняем данные товара:', { sku, productName, hasFile: !!file, text });
+
+                        const saveIndicator = document.createElement('div');
+                        saveIndicator.className = 'aiva-save-indicator';
+                        saveIndicator.textContent = 'Сохраняем кастомизацию...';
+                        btn.appendChild(saveIndicator);
+
+                        // ✅ ЗДЕСЬ ДОБАВЛЕН catch
+                        try {
+                            const fileBase64 = await new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(file);
+                            });
+
+                            const productData = {
+                                sku: sku,
+                                productName: productName,
+                                file: {
+                                    name: file.name,
+                                    size: file.size,
+                                    type: file.type,
+                                    data: fileBase64
+                                },
+                                text: text,
+                                timestamp: Date.now()
+                            };
+
+                            await cartDB.saveProduct(productData);
+                            console.log('✅ Данные товара сохранены в IndexedDB');
+                            saveIndicator.remove();
+                            window.showNotification?.('✅ Ваша кастомизация сохранена!');
+                        } catch (saveError) {
+                            console.error('❌ Ошибка сохранения в IndexedDB:', saveError);
+                            saveIndicator.remove();
+                            window.showNotification?.('⚠️ Не удалось сохранить кастомизацию', 'error');
+                        }
+
+                    } catch (error) {
+                        console.error('❌ Критическая ошибка при обработке:', error);
+                        e.preventDefault();
+                        window.showNotification?.('Ошибка: ' + error.message, 'error') || alert('Ошибка: ' + error.message);
+                    }
+                });
+
+                return true;
+            }
+
+            setTimeout(() => {
+                if (!setupCartHandler()) {
+                    console.log('⏳ Обработчик корзины не готов, наблюдаем за изменениями...');
+                    const observer = new MutationObserver(() => {
+                        if (setupCartHandler()) {
+                            console.log('✅ Обработчик корзины установлен через observer');
+                            observer.disconnect();
+                        }
+                    });
+                    observer.observe(productContainer, { childList: true, subtree: true });
+                }
+            }, 1000);
+        }
+
+        console.log('ℹ️ Логический скрипт использует TildaCartDB из скрипта корзины');
+    });
+</script>
